@@ -1,13 +1,15 @@
 from PIL import Image
 from math import sqrt
 from pynput.mouse import Button, Controller
+from pynput.keyboard import Listener, Key
 import time
 import pyautogui
 import requests
+import sys
 
-URL = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQhRfwVmHnOt0p7zNSYNhfWkYrkuFiTP7iTWQ&s"
-CLICK_RATIO = 1 / 15000
-CURSOR_SIZE = 1
+URL = "https://www.francetvinfo.fr/pictures/uCohbDFuRIFU83JQFWbeVAfxbMg/0x0:634x357/1500x843/2016/08/23/bowserdef.jpg"
+CLICK_RATIO = 1 / 500
+CURSOR_SIZE = 2
 
 mouse = Controller()
 
@@ -28,7 +30,8 @@ COLORS_TO_POSITION = {
     (204, 153, 102): (503, 594),
     (255, 178, 102): (512, 648),
     (255, 204, 204): (593, 648),
-    (153, 0, 0): (562, 497)
+    (153, 0, 0): (562, 497),
+    (255, 255, 255): (507, 447)
 }
 
 COLORS = list(COLORS_TO_POSITION.keys())
@@ -66,37 +69,72 @@ def calculate_dimensions(pos1, pos2):
     size_y = pos2[1] - initial_y
     return initial_x, initial_y, size_x, size_y
 
-def closest_color(rgb):
-    return min(COLORS, key=lambda color: sqrt(sum((c1 - c2) ** 2 for c1, c2 in zip(rgb, color))))
-
 def load_and_resize_image(url, new_size):
     img = Image.open(requests.get(url, stream=True).raw)
     return img.resize(new_size)
 
-def draw_image_from_colors(img, initial_x, initial_y):
-    for color, position in COLORS_TO_POSITION.items():
-        move(position)
-        click()
-        dx, dy = initial_x, initial_y
+def draw_image_from_stored_colors(color_positions, initial_x, initial_y, img):
+    for color, positions in color_positions.items():
+        position_on_screen = COLORS_TO_POSITION.get(color)
 
-        for y in range(img.height):
+        if position_on_screen:
+            move(position_on_screen)
+            click()  # Click to select the color
+
+            for (x, y) in positions:
+                move((initial_x + x * CURSOR_SIZE, initial_y + y * CURSOR_SIZE))
+                click()
+
+def closest_color(rgb):
+    r, g, b = rgb
+    color_diffs = []
+    for color in COLORS:
+        cr, cg, cb = color
+        color_diff = sqrt((r - cr) ** 2 + (g - cg)**2 + (b - cb)**2)
+        color_diffs.append((color_diff, color))
+    return min(color_diffs)[1]
+
+def store_pixels_by_color(img):
+    color_positions = {}
+
+    for y in range(img.height):
             for x in range(img.width):
-                pixel = closest_color(img.getpixel((x, y)))
-                if pixel == color and pixel != (255, 255, 255):
-                    move((dx, dy))
-                    press()
-                else:
-                    release()
-                dx += CURSOR_SIZE
-            dy += CURSOR_SIZE
-            dx = initial_x
+                color = closest_color(img.getpixel((x, y)))
+
+                if str(color) == '(255, 255, 255)':
+                    continue
+
+                if color not in color_positions:
+                    color_positions[color] = []
+
+                color_positions[color].append((x, y))
+
+    return color_positions
+
+def on_press(key):
+    try:
+        if key == Key.esc:
+            print("Escape key pressed, exiting...")
+            sys.exit()
+    except AttributeError:
+        pass
 
 def main():
+
+    listener = Listener(on_press=on_press)
+    listener.start()
+
+
     click_positions = capture_click_positions()
     initial_x, initial_y, size_x, size_y = calculate_dimensions(*click_positions)
     
     img = load_and_resize_image(URL, (int(size_x / CURSOR_SIZE), int(size_y / CURSOR_SIZE)))
-    draw_image_from_colors(img, initial_x, initial_y)
+
+    color_positions = store_pixels_by_color(img)
+
+    time.sleep(5)
+
+    draw_image_from_stored_colors(color_positions, initial_x, initial_y, img)
 
 if __name__ == "__main__":
     main()
